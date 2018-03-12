@@ -1,0 +1,21 @@
+CREATE TABLE trips(
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(255),
+    `price` DECIMAL(12,4),
+    `or_city` VARCHAR(255),
+    `dst_city` VARCHAR(255),
+    `str_date` DATE,
+    `end_date` DATE,
+    `duration` INT,
+    `category` VARCHAR(255),
+    `seat` VARCHAR(255),
+    `gst_rating` DECIMAL(4, 2),
+    `wifi` BOOLEAN,
+    `parking` BOOLEAN,
+    `breakfast` BOOLEAN,
+    `spa` BOOLEAN,
+    INDEX (`or_city`),
+    INDEX (`dst_city`),
+    INDEX (`str_date`),
+    INDEX (`end_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;

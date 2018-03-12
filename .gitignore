@@ -1,0 +1,9 @@
+data/*
+!data/.gitkeep
+
+dist/*
+checkpoints/*
+
+*/**/__pycache__
+*/**/*.pyc
+*.egg-info
