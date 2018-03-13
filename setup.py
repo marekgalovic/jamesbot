@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(name='jamesbot',
   version='1',
-  packages=['jamesbot'],
+  packages=find_packages(),
   description='JamesBot - v.1',
   author='Marek Galovic',
   author_email='galovic.galovic@gmail.com',
