@@ -215,7 +215,7 @@ class SupervisedTrainer(Trainer):
             self.action_targets: batch['action_targets'],
             self.value_targets: batch['value_targets'],
             # Conf
-            self._loss_mixture_weights: [1., 1., 1., 1., 1.],
+            self._loss_mixture_weights: [1., 1., 1., .5, .5],
             self._decoder_sampling_p: self._compute_decoder_sampling_p(e)
         }
 

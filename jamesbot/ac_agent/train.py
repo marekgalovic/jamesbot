@@ -63,6 +63,6 @@ def train(n_epochs, batch_size=64):
 
 if __name__ == '__main__':
     train(
-        n_epochs = 30,
+        n_epochs = 20,
         batch_size = 64
     )

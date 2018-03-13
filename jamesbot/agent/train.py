@@ -40,7 +40,7 @@ def train(n_epochs, batch_size=64):
         n_slots=len(slots_dict),
         n_actions=len(actions_dict),
         word_embeddings_shape=embeddings.shape,
-        save_path='{0}/agent_{1}'.format(options.models_dir, options.run_name),
+        save_path='{0}/ac_agent_{1}'.format(options.models_dir, options.run_name),
         batch_size=batch_size
     )
 
@@ -63,6 +63,6 @@ def train(n_epochs, batch_size=64):
 
 if __name__ == '__main__':
     train(
-        n_epochs = 30,
+        n_epochs = 20,
         batch_size = 64
     )

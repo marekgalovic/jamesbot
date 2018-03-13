@@ -9,7 +9,6 @@ from jamesbot.utils.embeddings import EmbeddingHandler
 from jamesbot.utils.padding import pad_array_of_complex
 from jamesbot.utils.tokenization import tokenize
 
-from utils import SamplesIterator
 from model import Agent
 
 from jamesbot.db import query
@@ -55,6 +54,7 @@ class ChatSession(object):
         self._state_memory = np.zeros((4, 3, 1, self._state_size))
         self._previous_output = [0]
         self._query_params = {}
+        self._result = {}
 
     def _update_state(self, new_states):
         new_states = np.asarray(new_states)
@@ -102,21 +102,7 @@ class ChatSession(object):
         return 0, {}
 
     def _build_agent(self):
-        self.state = tf.placeholder(tf.float32, [3, 1, self._state_size])
-        self.inputs = tf.placeholder(tf.int32, [1, None])
-        self.inputs_length = tf.placeholder(tf.int32, [1])
-        self.previous_output = tf.placeholder(tf.int32, [1, None])
-        self.previous_output_length = tf.placeholder(tf.int32, [1])
-
-        self.query_result_state = tf.placeholder(tf.int32, [1])
-        self.query_result_slots = tf.placeholder(tf.int32, [None, None])
-        self.query_result_values = tf.placeholder(tf.int32, [None, None, None])
-        self.query_result_slots_count = tf.placeholder(tf.int32, [None])
-        self.query_result_values_length = tf.placeholder(tf.int32, [None, None])
-
         self.agent = Agent(
-            self.state, self.inputs, self.inputs_length, self.previous_output, self.previous_output_length, self.query_result_state,
-            self.query_result_slots, self.query_result_values, self.query_result_slots_count, self.query_result_values_length,
             word_embeddings_shape = [len(self._word_embeddings), 300],
             n_slots = len(self._slot_embeddings), n_actions = len(self._action_embbeddings),
             hidden_size = self._hidden_size
@@ -151,16 +137,16 @@ class ChatSession(object):
             query_result_embedded = pad_array_of_complex([self._embed_complex(self._query_result)])
 
         return {
-            self.state: self._get_state(),
-            self.inputs: [inputs],
-            self.inputs_length: [len(inputs)],
-            self.previous_output: [self._previous_output],
-            self.previous_output_length: [len(self._previous_output)],
-            self.query_result_state: [self._query_state],
-            self.query_result_slots: query_result_embedded['slots'],
-            self.query_result_values: query_result_embedded['values'],
-            self.query_result_slots_count: query_result_embedded['slots_count'],
-            self.query_result_values_length: query_result_embedded['values_length']
+            self.agent.previous_context_state: self._get_state(),
+            self.agent.inputs: [inputs],
+            self.agent.inputs_length: [len(inputs)],
+            self.agent.previous_output: [self._previous_output],
+            self.agent.previous_output_length: [len(self._previous_output)],
+            self.agent.query_result_state: [self._query_state],
+            self.agent.query_result_slots: query_result_embedded['slots'],
+            self.agent.query_result_values: query_result_embedded['values'],
+            self.agent.query_result_slots_count: query_result_embedded['slots_count'],
+            self.agent.query_result_values_length: query_result_embedded['values_length']
         }
 
     def response(self, message):
@@ -168,17 +154,17 @@ class ChatSession(object):
         inputs = self._word_embeddings.embeddings(message_tokens)
 
         # Parse slots
-        slots, slot_any, actions, new_state = self._sess.run([self.agent.slot_ids, self.agent.slot_any, self.agent.action_ids, self.agent.policy_state], feed_dict={
-            self.state: self._get_state(),
-            self.inputs: [inputs],
-            self.inputs_length: [len(inputs)],
-            self.previous_output: [self._previous_output],
-            self.previous_output_length: [len(self._previous_output)],
-            self.query_result_state: [0],
-            self.query_result_slots: [[0]],
-            self.query_result_values: [[[0]]],
-            self.query_result_slots_count: [1],
-            self.query_result_values_length: [[1]]
+        slots, slot_any, actions, new_state = self._sess.run([self.agent.slot_ids, self.agent.slot_any, self.agent.action_ids, self.agent.context_state], feed_dict={
+            self.agent.previous_context_state: self._get_state(),
+            self.agent.inputs: [inputs],
+            self.agent.inputs_length: [len(inputs)],
+            self.agent.previous_output: [self._previous_output],
+            self.agent.previous_output_length: [len(self._previous_output)],
+            self.agent.query_result_state: [0],
+            self.agent.query_result_slots: [[0]],
+            self.agent.query_result_values: [[[0]]],
+            self.agent.query_result_slots_count: [1],
+            self.agent.query_result_values_length: [[1]]
         })
         # Update query params
         self._query_params = self._parse_slots(message, slots, slot_any)
@@ -194,7 +180,7 @@ class ChatSession(object):
 
         # Generate response
         outputs, new_state, actions, value = self._sess.run(
-            [self.agent.decoder_token_ids, self.agent.policy_state, self.agent.action_ids, self.agent.value],
+            [self.agent.decoder_token_ids, self.agent.context_state, self.agent.action_ids, self.agent.value],
             feed_dict=self._feed_dict(inputs)
         )
 

@@ -118,14 +118,14 @@ class Agent(object):
                 self._inputs_encoder_outputs,
                 self._hidden_size,
                 activation = tf.nn.tanh,
-                name = 'inputs_encoder_outputs_projection'
+                name = 'inputs_e_projection'
             )
             e_previous_output = tf.layers.dense(
                 self._previous_output_encoder_outputs,
                 self._hidden_size,
                 activation = tf.nn.tanh,
-                name = 'previous_output_encoder_outputs_projection',
-                # reuse = True
+                name = 'inputs_e_projection',
+                reuse = True
             )
             
             e = tf.matmul(e_inputs, e_previous_output, transpose_b=True, name='e')
@@ -241,23 +241,20 @@ class Agent(object):
 
             if self._decoder_helper_initializer is not None:
                 helper = self._decoder_helper_initializer(self._word_embeddings)
-                decoder = seq2seq.BasicDecoder(
-                    decoder_cell,
-                    helper = helper,
-                    initial_state = decoder_initial_state,
-                    output_layer = logits_projection 
-                )
             else:
-                decoder = seq2seq.BeamSearchDecoder(
-                    decoder_cell,
+                helper = seq2seq.GreedyEmbeddingHelper(
                     embedding = self._word_embeddings,
                     start_tokens = tf.tile([0], [batch_size]),
-                    end_token = 1,
-                    initial_state = decoder_initial_state,
-                    beam_width = 3,
-                    output_layer = logits_projection
+                    end_token = 1
                 )
-            
+
+            decoder = seq2seq.BasicDecoder(
+                decoder_cell,
+                helper = helper,
+                initial_state = decoder_initial_state,
+                output_layer = logits_projection 
+            )
+
             decoder_outputs, _, _ = seq2seq.dynamic_decode(
                 decoder = decoder,
                 impute_finished = True
