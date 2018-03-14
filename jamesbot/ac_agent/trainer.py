@@ -1,10 +1,14 @@
+import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import seq2seq
-import numpy as np
+from nltk.translate.bleu_score import sentence_bleu
 
 from jamesbot.utils.padding import add_pad_eos
+from jamesbot.seq2seq import GreedyEmbeddingTrainingHelper
 
 from model import Agent
+from decoder_critic import DecoderCritic
+
 
 class Trainer(object):
 
@@ -18,7 +22,6 @@ class Trainer(object):
         self._n_actions = n_actions
         self._word_embeddings_shape = word_embeddings_shape
         self._hidden_size = hidden_size
-        
         self._batch_size = batch_size
         
         self.reset()
@@ -249,12 +252,10 @@ class SupervisedTrainer(Trainer):
         self._update_states(new_states)
 
 
-class DecoderACTrainer(Trainer):
+class ACTrainer(Trainer):
 
-    CELL_SIZE = 300
-
-    def __init__(**kwargs):
-        super(DecoderACTrainer, self).__init__(**kwargs)
+    def __init__(self, word_dict, **kwargs):
+        super(ACTrainer, self).__init__(**kwargs)
 
         self.targets = tf.placeholder(tf.int32, [None, None])
         self.targets_length = tf.placeholder(tf.int32, [None])
@@ -267,78 +268,47 @@ class DecoderACTrainer(Trainer):
             decoder_helper_initializer = self._decoder_helper()
         )
 
-        with tf.name_scope('decoder_ac_trainer'):
-            self._embeddings()
-            self._targets_encoder()
-            self._values_decoder()
+        self.critic = DecoderCritic(self.agent, self.targets, self.targets_length)
 
     def _decoder_helper(self):
-        def _closure(word_embeddings):
-            # Return custom decoder
-            pass
-
-        return _closure
-
-    def _embeddings(self):
-        with tf.name_scope('embeddings'):
-            self._targets_embedded = tf.nn.embedding_lookup(
-                self.agent._word_embeddings,
-                add_pad_eos(self.targets, self.targets_length)
+        def _initializer(word_embeddings):
+            return GreedyEmbeddingTrainingHelper(
+                start_tokens = tf.tile([0], [tf.shape(self.targets)[0]]),
+                sequence_length = (self.targets_length + 2),
+                embedding = word_embeddings
             )
 
-    def _targets_encoder(self):
-        with tf.name_scope('targets_encoder'):
-            (_outputs, _state) = tf.nn.bidirectional_dynamic_rnn(
-                fw_cell = rnn.GRUCell(self.CELL_SIZE, activation=tf.nn.tanh),
-                bw_cell = rnn.GRUCell(self.CELL_SIZE, activation=tf.nn.tanh),
-                inputs = self._targets_embedded,
-                sequence_length = self.targets_length,
-                dtype = tf.float32
-             )
+        return _initializer
 
-            self._targets_encoder_outputs = tf.concat(_outputs, -1)
-            self._targets_encoder_state = tf.concat(_state, -1)
+    def _feed_dict(self, batch, opts = {}):
+        fd = {
+            # Agent inputs
+            self.agent.previous_context_state: self._get_states(),
+            self.agent.inputs: batch['inputs'],
+            self.agent.inputs_length: batch['inputs_length'],
+            self.agent.previous_output: batch['previous_output'],
+            self.agent.previous_output_length: batch['previous_output_length'],
+            self.agent.query_result_state: batch['query_result_state'],
+            self.agent.query_result_slots: batch['query_result']['slots'],
+            self.agent.query_result_values: batch['query_result']['values'],
+            self.agent.query_result_slots_count: batch['query_result']['slots_count'],
+            self.agent.query_result_values_length: batch['query_result']['values_length'],
+            # Critic inputs
+            self.targets: batch['targets'],
+            self.targets_length: batch['targets_length'],
+            self._dropout: 0.3
+        }
 
-    def _values_decoder(self):
-        with tf.name_scope('values_decoder'):
-            decoder_cell, decoder_initial_state = self._decoder_cell()
+        for opt, val in opts.items():
+            fd[opt] = val
 
-            helper = seq2seq.TrainingHelper(
-                inputs = self.agent._decoder_logits,
-                sequence_length = self.targets_length
-            )
+        return fd
 
-            decoder = seq2seq.BasicDecoder(
-                decoder_cell,
-                helper = helper,
-                initial_state = decoder_initial_state,
-                output_layer = Dense(1)
-            )
-
-            decoder_outputs, _, _ = seq2seq.dynamic_decode(
-                decoder = decoder,
-                impute_finished = True
-            )
-
-            self.values = decoder_outputs.rnn_output
-
-    def _decoder_cell(self):
-        batch_size, _ = tf.unstack(tf.shape(self._contexts))
-
-        attention = seq2seq.BahdanauAttention(
-            num_units = 2*self.CELL_SIZE,
-            memory = self._targets_encoder_outputs,
-            memory_sequence_length = self.targets_length
-        )
-        
-        attentive_cell = seq2seq.AttentionWrapper(
-            cell = rnn.GRUCell(2*self.CELL_SIZE, activation=tf.nn.tanh),
-            attention_mechanism = attention,
-            attention_layer_size = 2*self.CELL_SIZE,
-            initial_cell_state = self._targets_encoder_state
+    def train_batch(self, e, i, batch):
+        return self._sess.run(
+            [self.agent.decoder_token_ids, self.critic.token_values],
+            feed_dict = self._feed_dict(batch)
         )
 
-        return (
-            attentive_cell,
-            attentive_cell.zero_state(batch_size, tf.float32),
-        )
+    def test_batch(self, e, i, batch):
+        pass

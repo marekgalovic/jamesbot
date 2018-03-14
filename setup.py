@@ -8,7 +8,8 @@ setup(name='jamesbot',
   author_email='galovic.galovic@gmail.com',
   license='MIT',
   install_requires=[
-    'numpy'
+    'numpy',
+    'nltk'
   ],
   zip_safe=False
 )
