@@ -15,17 +15,20 @@ def add_pad_eos(indices, sequence_length, eos_token = 1, pre_pad = True):
         return tf.concat([indices, pad, pad], 1) + eos
 
 
-def pad_sequences(sequences, max_len, pad_value=0):
+def pad_sequences(sequences, max_len=None, pad_value=0, dtype=np.int32):
     '''
     :param sequences: An array of arrays of different lengths that will be padded to [len(sequences) x max_len] matrix
     '''
+    if max_len is None:
+        max_len = max(map(len, sequences))
+        
     result = []
     for sequence in sequences:
         if len(sequence) < max_len:
             result.append(sequence + [pad_value]*(max_len - len(sequence)))
         if len(sequence) >= max_len:
             result.append(sequence[:max_len])
-    return np.array(result, dtype=np.int32)
+    return np.array(result, dtype=dtype)
 
 
 def pad_complex(struct, max_keys_len, max_values_len, pad_value=0, shuffle=True):

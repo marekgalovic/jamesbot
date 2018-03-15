@@ -7,7 +7,7 @@ from jamesbot.utils.padding import add_pad_eos
 
 class Agent(object):
     
-    def __init__(self, word_embeddings_shape, n_slots, n_actions, trainable_embeddings=True, hidden_size=300, dropout=0.0, decoder_helper_initializer=None):
+    def __init__(self, word_embeddings_shape, n_slots, n_actions, trainable_embeddings=True, hidden_size=300, dropout=0.0, decoder_helper_initializer=None, scope='agent', reuse=False):
         super(Agent, self).__init__()
 
         # Conf
@@ -25,7 +25,7 @@ class Agent(object):
         print('Agent(hidden_size={0}, n_slots={1}, n_actions={2})'.format(self._hidden_size, self._n_slots, self._n_actions))
         
         # Build
-        with tf.name_scope('agent'):
+        with tf.variable_scope(scope, reuse=reuse):
             self._placeholders()
             self._embeddings_module()
             self._input_encoder()
@@ -34,6 +34,8 @@ class Agent(object):
             self._context()
             self._action_policy()
             self._response_generator()
+
+            self._vars = [var for var in tf.trainable_variables() if var.name.startswith(scope)]
         
         self._saver_ops()
         
@@ -261,6 +263,7 @@ class Agent(object):
             )
             
             self._decoder_logits = decoder_outputs.rnn_output
+            self.decoder_probabilities = tf.nn.softmax(self._decoder_logits)
             self.decoder_token_ids = tf.argmax(self._decoder_logits, -1, output_type=tf.int32)
             
     def _decoder_cell(self):

@@ -1,9 +1,10 @@
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import seq2seq
-from nltk.translate.bleu_score import sentence_bleu
 
-from jamesbot.utils.padding import add_pad_eos
+from jamesbot.utils.bleu import compute_bleu
+from jamesbot.utils.padding import add_pad_eos, pad_sequences
+from jamesbot.utils.embeddings import EmbeddingHandler
 from jamesbot.seq2seq import GreedyEmbeddingTrainingHelper
 
 from model import Agent
@@ -254,12 +255,20 @@ class SupervisedTrainer(Trainer):
 
 class ACTrainer(Trainer):
 
+    LAMBDA_C = 0.1
+    LAMBDA_LL = 0.1
+
     def __init__(self, word_dict, **kwargs):
         super(ACTrainer, self).__init__(**kwargs)
+
+        assert isinstance(word_dict, EmbeddingHandler)
+        self._word_dict = word_dict
 
         self.targets = tf.placeholder(tf.int32, [None, None])
         self.targets_length = tf.placeholder(tf.int32, [None])
         self._dropout = tf.placeholder(tf.float32, [])
+
+        self._r = tf.placeholder(tf.float32, [None, None])
 
         self.agent = Agent(
             n_slots = self._n_slots, n_actions = self._n_actions,
@@ -269,6 +278,9 @@ class ACTrainer(Trainer):
         )
 
         self.critic = DecoderCritic(self.agent, self.targets, self.targets_length)
+
+        self._objectives()
+        self._train_ops()
 
     def _decoder_helper(self):
         def _initializer(word_embeddings):
@@ -304,11 +316,70 @@ class ACTrainer(Trainer):
 
         return fd
 
+    @property
+    def _generated_token_weights(self):
+        # TODO: Use target agent
+        # TODO: Use gather_nd
+        token_mask = tf.one_hot(tf.stop_gradient(self.agent.decoder_token_ids), self._word_embeddings_shape[0])
+        return tf.reduce_sum(token_mask * self.critic.values, -1)
+
+    @property
+    def _generated_token_probabilites(self):
+        # TODO: Use target agent
+        # TODO: Use gather_nd
+        token_mask = tf.one_hot(tf.stop_gradient(self.agent.decoder_token_ids), self._word_embeddings_shape[0])
+        return tf.reduce_sum(token_mask * self.agent.decoder_probabilities, -1)
+
+    def _objectives(self):
+        # TODO: Use target actor/critic for q
+        q = self._r + tf.stop_gradient(tf.reduce_sum(self.agent.decoder_probabilities * self.critic.values, -1))
+        c = tf.reduce_sum(tf.square(self.critic.values - tf.reduce_mean(self.critic.values, -1, keep_dims=True)), -1)
+        self._critic_objective = tf.reduce_sum(tf.square(self._generated_token_weights - q) + (self.LAMBDA_C * c), [-1, -2])
+
+        ll_reg = tf.reduce_sum(self._generated_token_probabilites, -1)
+        self._actor_objective = tf.reduce_sum(tf.reduce_sum(self.agent.decoder_probabilities * self.critic.values, [-1, -2]) + self.LAMBDA_LL * ll_reg)
+
+    def _train_ops(self):
+        self._train_critic = (
+            tf.train.AdamOptimizer()
+            .minimize(self._critic_objective, var_list=self.critic._vars)
+        )
+
+        self._train_actor = (
+            tf.train.AdamOptimizer()
+            .minimize(self._actor_objective, var_list=self.agent._vars)
+        )
+
+    def _bleu_reward(self, batch, predictions):
+        # Shaped BLEU Scores
+        rewards = []
+        for i, target in enumerate(batch['targets']):
+            rewards.append([])
+
+            for j in range(1, batch['targets_length'][i] + 1):
+                bleu, _, _, _, _, _ = compute_bleu(
+                    [[target[:j]]], [predictions[i][:j]],
+                    smooth=True
+                )
+
+                previous_reward = (rewards[i][-1] if len(rewards[i]) > 0 else 0.0)
+                rewards[i].append(bleu - previous_reward)
+
+        return pad_sequences(rewards, max_len=max(batch['targets_length'])+2, dtype=np.float32)
+
     def train_batch(self, e, i, batch):
-        return self._sess.run(
-            [self.agent.decoder_token_ids, self.critic.token_values],
+        token_ids = self._sess.run(
+            self.agent.decoder_token_ids,
             feed_dict = self._feed_dict(batch)
         )
+
+        r = self._bleu_reward(batch, token_ids)
+        actor_loss, critic_loss, _, _ = self._sess.run(
+            [self._actor_objective, self._critic_objective, self._train_critic, self._train_actor],
+            feed_dict = self._feed_dict(batch, {self._r: r})
+        )
+
+        return actor_loss, critic_loss
 
     def test_batch(self, e, i, batch):
         pass

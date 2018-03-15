@@ -18,7 +18,7 @@ class GreedyEmbeddingTrainingHelper(CustomHelper):
 
         def _next_inputs(time, outputs, state, sample_ids):
             return (
-                (time >= sequence_length),
+                (time >= (sequence_length - 1)),
                 tf.nn.embedding_lookup(embedding, sample_ids),
                 state,
             )

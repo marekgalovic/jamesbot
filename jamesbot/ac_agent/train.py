@@ -4,6 +4,8 @@ import numpy as np
 from optparse import OptionParser
 from tensorflow.python.lib.io.file_io import FileIO
 
+from jamesbot.utils.embeddings import EmbeddingHandler
+
 from utils import SamplesIterator
 from trainer import ACTrainer
 
@@ -26,6 +28,8 @@ def load_data(name):
 
 
 embeddings = np.asarray(load_data('embeddings.json'))
+word_dict = load_data('word_dictionary.json')
+
 slots_dict = load_data('slots_dictionary.json')
 actions_dict = load_data('actions_dictionary.json')
 
@@ -42,7 +46,7 @@ def train(n_epochs, batch_size=64):
         word_embeddings_shape=embeddings.shape,
         save_path='{0}/ac_agent_{1}'.format(options.models_dir, options.run_name),
         batch_size=batch_size,
-        word_dict={}
+        word_dict=EmbeddingHandler(word_dict)
     )
 
     trainer._sess.run(tf.global_variables_initializer())
@@ -53,10 +57,13 @@ def train(n_epochs, batch_size=64):
 
         trainer.reset()
         for i, batch in enumerate(train_samples_iterator.batches()):
-            token_ids, values = trainer.train_batch(e, i, batch)
-            print(token_ids.shape, values.shape)
+            a, c = trainer.train_batch(e, i, batch)
 
-            raise ValueError
+            print('Actor:', a)
+            print('Critic:', c)
+
+            if i > 4:
+                raise ValueError
 
         trainer.save_checkpoint(e)
 

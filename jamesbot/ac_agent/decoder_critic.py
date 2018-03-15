@@ -7,15 +7,17 @@ class DecoderCritic(object):
 
     CELL_SIZE = 300
 
-    def __init__(self, agent, targets, targets_length):
+    def __init__(self, agent, targets, targets_length, scope='critic', reuse=False):
         self._agent = agent
         self._targets = targets
         self._targets_length = targets_length
 
-        with tf.name_scope('decoder_ac_trainer'):
+        with tf.variable_scope(scope, reuse=reuse):
             self._embeddings()
             self._targets_encoder()
             self._values_decoder()
+
+            self._vars = [var for var in tf.trainable_variables() if var.name.startswith(scope)]
 
     def _embeddings(self):
         with tf.name_scope('embeddings'):
@@ -49,7 +51,7 @@ class DecoderCritic(object):
                 dtype = tf.float32
             )
 
-            self.token_values = tf.squeeze(tf.layers.dense(_outputs, 1), -1)
+            self.values = tf.layers.dense(_outputs, self._agent._word_embeddings_shape[0])
 
     def _decoder_cell(self):
         batch_size, _ = tf.unstack(tf.shape(self._targets))
