@@ -51,6 +51,7 @@ def train(n_epochs, batch_size=64):
 
     trainer._sess.run(tf.global_variables_initializer())
     trainer.initialize_word_embeddings(embeddings)
+    trainer._copy_weights()
 
     for e in range(n_epochs):
         print('Epoch:', e)

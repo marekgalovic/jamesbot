@@ -20,10 +20,9 @@ class Agent(object):
         self._dropout = dropout
 
         self._decoder_helper_initializer = decoder_helper_initializer
-        tf.summary.scalar('dropout', self._dropout)
 
-        print('Agent(hidden_size={0}, n_slots={1}, n_actions={2})'.format(self._hidden_size, self._n_slots, self._n_actions))
-        
+        print('Agent(hidden_size={0}, n_slots={1}, n_actions={2}, scope={3})'.format(self._hidden_size, self._n_slots, self._n_actions, str(scope)))
+
         # Build
         with tf.variable_scope(scope, reuse=reuse):
             self._placeholders()

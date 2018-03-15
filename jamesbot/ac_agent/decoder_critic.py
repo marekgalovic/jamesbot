@@ -19,6 +19,8 @@ class DecoderCritic(object):
 
             self._vars = [var for var in tf.trainable_variables() if var.name.startswith(scope)]
 
+        print('DecoderCritic(cell_size={0}, scope={1})'.format(self.CELL_SIZE, str(scope)))
+
     def _embeddings(self):
         with tf.name_scope('embeddings'):
             self._targets_embedded = tf.nn.embedding_lookup(
