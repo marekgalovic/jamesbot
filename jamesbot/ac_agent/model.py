@@ -35,15 +35,11 @@ class Agent(object):
             self._response_generator()
 
             self._vars = [var for var in tf.trainable_variables() if var.name.startswith(scope)]
-        
-        self._saver_ops()
+            self.saver = tf.train.Saver(var_list = self._vars, max_to_keep=None)
         
     @property
     def context_state_size(self):
-        return 2*self._hidden_size
-        
-    def _saver_ops(self):
-        self.saver = tf.train.Saver(max_to_keep=None)
+        return 2*self._hidden_size        
 
     def _placeholders(self):
         # Context

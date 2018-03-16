@@ -4,7 +4,6 @@ from tensorflow.contrib import seq2seq
 
 from jamesbot.utils.bleu import compute_bleu
 from jamesbot.utils.padding import add_pad_eos, pad_sequences
-from jamesbot.utils.embeddings import EmbeddingHandler
 from jamesbot.seq2seq import GreedyEmbeddingTrainingHelper
 
 from model import Agent
@@ -15,10 +14,8 @@ class Trainer(object):
 
     DILATATION_RATES = [4, 2, 1]
     
-    def __init__(self, n_slots, n_actions, word_embeddings_shape, save_path, hidden_size=300, graph=None, batch_size=64):
-        print('Trainer - Dilatation rates:', self.DILATATION_RATES)
-
-        self._sess = tf.Session(graph=graph)
+    def __init__(self, n_slots, n_actions, word_embeddings_shape, save_path, hidden_size=300, sess=None, graph=None, batch_size=64):
+        self._sess = (sess or tf.Session(graph=graph))
         self._save_path = save_path
         
         self._n_slots = n_slots
@@ -26,18 +23,31 @@ class Trainer(object):
         self._word_embeddings_shape = word_embeddings_shape
         self._hidden_size = hidden_size
         self._batch_size = batch_size
+
+        print('Trainer - Dilatation rates:', self.DILATATION_RATES)
+        print('Metrics path:', self.metrics_path)
+        print('Checkpoints path:', self.checkpoints_path)
         
         self.reset()
+
+    def set_batch_size(self, batch_size):
+        self._batch_size = int(batch_size)
 
     @property
     def states_memory_shape(self):
         return (4, 3, self._batch_size, 2*self._hidden_size)
-    
+
+    @property
+    def metrics_path(self):
+        return '{0}/metrics'.format(self._save_path)
+
+    @property
+    def checkpoints_path(self):
+        return '{0}/checkpoints/model.ckpt'.format(self._save_path)
+
     def _metrics_writers(self):
-        print('Metrics path {0}/metrics/'.format(self._save_path))
-        
-        self._train_writer = tf.summary.FileWriter('{0}/metrics/train'.format(self._save_path), self._sess.graph)
-        self._test_writer = tf.summary.FileWriter('{0}/metrics/test'.format(self._save_path), self._sess.graph)
+        self._train_writer = tf.summary.FileWriter('{0}/train'.format(self.metrics_path), self._sess.graph)
+        self._test_writer = tf.summary.FileWriter('{0}/test'.format(self.metrics_path), self._sess.graph)
         self._metrics_op = tf.summary.merge_all()
         
     def initialize_word_embeddings(self, embeddings):
@@ -47,7 +57,7 @@ class Trainer(object):
         return self._sess.run(init_op, feed_dict={embeddings_ph: embeddings})
 
     def save_checkpoint(self, step):
-        print('Write checkpoint:', self.agent.saver.save(self._sess, '{0}/checkpoints/model.ckpt'.format(self._save_path), global_step=step))
+        self.agent.saver.save(self._sess, self.checkpoints_path, global_step=step)
     
     def reset(self):
         self._states_index = np.zeros(self._batch_size, dtype=np.int32)
@@ -81,29 +91,30 @@ class Trainer(object):
         self._states_index += 1
         assert self._states_memory.shape == self.states_memory_shape
 
-class SupervisedTrainer(Trainer):
+class CrossEntropyTrainer(Trainer):
     
-    def __init__(self, **kwargs):
-        super(SupervisedTrainer, self).__init__(**kwargs)
+    def __init__(self, scope='agent', **kwargs):
+        super(CrossEntropyTrainer, self).__init__(**kwargs)
         
-        self.targets = tf.placeholder(tf.int32, [None, None])
-        self.targets_length = tf.placeholder(tf.int32, [None])
-        self.slot_targets = tf.placeholder(tf.int32, [None, None])
-        self.slot_any_targets = tf.placeholder(tf.int32, [None, None])
-        self.action_targets = tf.placeholder(tf.int32, [None])
-        self.value_targets = tf.placeholder(tf.float32, [None])
+        self.targets = tf.placeholder(tf.int32, [None, None], name='ph/targets')
+        self.targets_length = tf.placeholder(tf.int32, [None], name='ph/targets_length')
+        self.slot_targets = tf.placeholder(tf.int32, [None, None], name='ph/slot_targets')
+        self.slot_any_targets = tf.placeholder(tf.int32, [None, None], name='ph/slot_any_targets')
+        self.action_targets = tf.placeholder(tf.int32, [None], name='ph/action_targets')
+        self.value_targets = tf.placeholder(tf.float32, [None], name='ph/value_targets')
         
-        self._decoder_sampling_p = tf.placeholder(tf.float32, [])
-        self._loss_mixture_weights = tf.placeholder(tf.float32, [None])
+        self._decoder_sampling_p = tf.placeholder(tf.float32, [], name='ph/decoder_sampling_p')
+        self._loss_mixture_weights = tf.placeholder(tf.float32, [None], name='ph/loss_mixture_weights')
 
-        self._dropout = tf.placeholder(tf.float32, [])
+        self._dropout = tf.placeholder(tf.float32, [], name='ph/dropout')
         tf.summary.scalar('dropout', self._dropout)
         
         self.agent = Agent(
             n_slots = self._n_slots, n_actions = self._n_actions,
             word_embeddings_shape = self._word_embeddings_shape,
             hidden_size = self._hidden_size, dropout=self._dropout,
-            decoder_helper_initializer = self._decoder_helper()
+            decoder_helper_initializer = self._decoder_helper(),
+            scope = scope
         )
         
         self._loss()
@@ -264,18 +275,17 @@ class ACTrainer(Trainer):
     GAMMA_ACTOR = 1e-2
     GAMMA_CRITIC = 1e-2
 
-    def __init__(self, word_dict, agent_checkpoint=None, **kwargs):
+    def __init__(self, agent_path=None, **kwargs):
         super(ACTrainer, self).__init__(**kwargs)
 
-        assert isinstance(word_dict, EmbeddingHandler)
-        self._word_dict = word_dict
-        self._agent_checkpoint = agent_checkpoint
+        self.targets = tf.placeholder(tf.int32, [None, None], name='ph/targets')
+        self.targets_length = tf.placeholder(tf.int32, [None], name='ph/targets_length')
+        self._r = tf.placeholder(tf.float32, [None, None], name='ph/r')
 
-        self.targets = tf.placeholder(tf.int32, [None, None])
-        self.targets_length = tf.placeholder(tf.int32, [None])
-        self._r = tf.placeholder(tf.float32, [None, None])
+        avg_bleu = tf.reduce_mean(tf.reduce_sum(self._r, -1) / tf.cast(self.targets_length, tf.float32))
+        tf.summary.scalar('avg_bleu', avg_bleu)
 
-        self._dropout = tf.placeholder(tf.float32, [])
+        self._dropout = tf.placeholder(tf.float32, [], name='ph/dropout')
         tf.summary.scalar('dropout', self._dropout)
 
         self.target_agent = self._agent_builder(scope='target_agent')
@@ -287,20 +297,34 @@ class ACTrainer(Trainer):
         self._objectives()
         self._interpolate_ops()
         self._train_ops()
+        self._initialize(agent_path)
+        self._metrics_writers()
 
-    def _agent_builder(self, scope='agent'):
+    def save_checkpoint(self, step):
+        self.target_agent.saver.save(self._sess, '{0}/checkpoints/target_agent.ckpt'.format(self._save_path), global_step=step)
+        self.target_critic.saver.save(self._sess, '{0}/checkpoints/target_critic.ckpt'.format(self._save_path), global_step=step)
+
+    def _initialize(self, agent_path):
+        self._sess.run(tf.global_variables_initializer())
+        self.target_agent.saver.restore(self._sess, agent_path)
+
+        copy_ops = []
+        for var, target_var in zip(self.agent._vars, self.target_agent._vars):
+            copy_ops.append(var.assign(target_var))
+            
+        for var, target_var in zip(self.critic._vars, self.target_critic._vars):
+            copy_ops.append(var.assign(target_var))
+
+        copy_ops = tf.group(*copy_ops)
+        self._sess.run(copy_ops)
+
+    def _agent_builder(self, scope='agent', reuse=False):
         return Agent(
             n_slots = self._n_slots, n_actions = self._n_actions,
             word_embeddings_shape = self._word_embeddings_shape,
             hidden_size = self._hidden_size, dropout=self._dropout,
             decoder_helper_initializer = self._decoder_helper(),
-            scope = scope
-        )
-
-    def _critc_builder(self, scope='critic'):
-        return DecoderCritic(
-            self.agent, self.targets, self.targets_length,
-            scope = scope
+            scope = scope, reuse = reuse
         )
 
     def _decoder_helper(self):
@@ -313,22 +337,18 @@ class ACTrainer(Trainer):
 
         return _initializer
 
-    def _copy_weights(self):
-        ops = []
-        for var, target_var in zip(self.agent._vars, self.target_agent._vars):
-            ops.append(var.assign(target_var))
-            
-        for var, target_var in zip(self.critic._vars, self.target_critic._vars):
-            ops.append(var.assign(target_var))
-
-        ops = tf.group(*ops)
-        self._sess.run(ops)
+    def _critc_builder(self, scope='critic'):
+        return DecoderCritic(
+            self.agent, self.targets, self.targets_length,
+            scope = scope
+        )
 
     def _feed_dict(self, batch, opts = {}):
         # TODO: Use single set of placeholders
+        context_states = self._get_states()
         fd = {
             # Agent inputs
-            self.agent.previous_context_state: self._get_states(),
+            self.agent.previous_context_state: context_states,
             self.agent.inputs: batch['inputs'],
             self.agent.inputs_length: batch['inputs_length'],
             self.agent.previous_output: batch['previous_output'],
@@ -339,7 +359,7 @@ class ACTrainer(Trainer):
             self.agent.query_result_slots_count: batch['query_result']['slots_count'],
             self.agent.query_result_values_length: batch['query_result']['values_length'],
             # Target agent inputs
-            self.target_agent.previous_context_state: self._get_states(),
+            self.target_agent.previous_context_state: context_states,
             self.target_agent.inputs: batch['inputs'],
             self.target_agent.inputs_length: batch['inputs_length'],
             self.target_agent.previous_output: batch['previous_output'],
@@ -378,22 +398,26 @@ class ACTrainer(Trainer):
         self._critic_objective = tf.reduce_sum(tf.square(self._generated_token_weights - q) + (self.LAMBDA_C * c), [-1, -2])
 
         ll_reg = tf.reduce_sum(self._generated_token_probabilites, -1)
-        self._actor_objective = tf.reduce_sum(tf.reduce_sum(self.agent.decoder_probabilities * self.critic.values, [-1, -2]) + self.LAMBDA_LL * ll_reg)
+        self._agent_objective = tf.reduce_sum(tf.reduce_sum(self.agent.decoder_probabilities * self.critic.values, [-1, -2]) + self.LAMBDA_LL * ll_reg)
+
+        tf.summary.scalar('critic_objective', self._critic_objective)
+        tf.summary.scalar('agent_objective', self._agent_objective)
 
     def _interpolate_ops(self):
-        ops = []
+        agent_ops, critic_ops = [], []
 
         for var, target_var in zip(self.agent._vars, self.target_agent._vars):
             assert 'target_%s' % var.name == target_var.name
             op = target_var.assign(self.GAMMA_ACTOR * var + (1. - self.GAMMA_ACTOR) * target_var)
-            ops.append(op)
+            agent_ops.append(op)
 
         for var, target_var in zip(self.critic._vars, self.target_critic._vars):
             assert 'target_%s' % var.name == target_var.name
             op = target_var.assign(self.GAMMA_CRITIC * var + (1. - self.GAMMA_CRITIC) * target_var)
-            ops.append(op)
+            critic_ops.append(op)
 
-        self._interpolate_weights = tf.group(*ops)
+        self._interpolate_agent_weights = tf.group(*agent_ops)
+        self._interpolate_critic_weights = tf.group(*critic_ops)
 
     def _train_ops(self):
         self._train_critic = (
@@ -401,9 +425,9 @@ class ACTrainer(Trainer):
             .minimize(self._critic_objective, var_list=self.critic._vars)
         )
 
-        self._train_actor = (
+        self._train_agent = (
             tf.train.AdamOptimizer()
-            .minimize(self._actor_objective, var_list=self.agent._vars)
+            .minimize(self._agent_objective, var_list=self.agent._vars)
         )
 
     def _bleu_reward(self, batch, predictions):
@@ -423,19 +447,66 @@ class ACTrainer(Trainer):
 
         return pad_sequences(rewards, max_len=max(batch['targets_length'])+2, dtype=np.float32)
 
-    def train_batch(self, e, i, batch):
-        token_ids = self._sess.run(
-            self.target_agent.decoder_token_ids,
+    def train_critic_batch(self, e, i, batch):
+        token_ids, new_states = self._sess.run(
+            [self.target_agent.decoder_token_ids, self.target_agent.context_state],
             feed_dict = self._feed_dict(batch)
         )
 
         r = self._bleu_reward(batch, token_ids)
-        actor_loss, critic_loss, _, _, _ = self._sess.run(
-            [self._actor_objective, self._critic_objective, self._train_critic, self._train_actor, self._interpolate_weights],
+        _, _, metrics_val = self._sess.run(
+            [self._train_critic, self._interpolate_critic_weights, self._metrics_op],
             feed_dict = self._feed_dict(batch, {self._r: r})
         )
 
-        return actor_loss, critic_loss
+        if i % 20 == 0:
+            self._train_writer.add_summary(metrics_val)
+        self._update_states(new_states)
+
+    def test_critic_batch(self, e, i, batch):
+        token_ids, new_states = self._sess.run(
+            [self.target_agent.decoder_token_ids, self.target_agent.context_state],
+            feed_dict = self._feed_dict(batch)
+        )
+
+        r = self._bleu_reward(batch, token_ids)
+        metrics_val = self._sess.run(
+            self._metrics_op,
+            feed_dict = self._feed_dict(batch, {self._r: r, self._dropout: 0.0})
+        )
+
+        if i % 20 == 0:
+            self._test_writer.add_summary(metrics_val)
+        self._update_states(new_states)
+
+    def train_batch(self, e, i, batch):
+        token_ids, new_states = self._sess.run(
+            [self.target_agent.decoder_token_ids, self.target_agent.context_state],
+            feed_dict = self._feed_dict(batch)
+        )
+
+        r = self._bleu_reward(batch, token_ids)
+        _, _, _, _, metrics_val = self._sess.run(
+            [self._train_critic, self._train_agent, self._interpolate_agent_weights, self._interpolate_critic_weights, self._metrics_op],
+            feed_dict = self._feed_dict(batch, {self._r: r})
+        )
+
+        if i % 200 == 0:
+            self._train_writer.add_summary(metrics_val)
+        self._update_states(new_states)
 
     def test_batch(self, e, i, batch):
-        pass
+        token_ids, new_states = self._sess.run(
+            [self.target_agent.decoder_token_ids, self.target_agent.context_state],
+            feed_dict = self._feed_dict(batch)
+        )
+
+        r = self._bleu_reward(batch, token_ids)
+        metrics_val = self._sess.run(
+            self._metrics_op,
+            feed_dict = self._feed_dict(batch, {self._r: r, self._dropout: 0.0})
+        )
+
+        if i % 200 == 0:
+            self._test_writer.add_summary(metrics_val)
+        self._update_states(new_states)

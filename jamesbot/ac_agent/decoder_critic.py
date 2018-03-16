@@ -18,6 +18,7 @@ class DecoderCritic(object):
             self._values_decoder()
 
             self._vars = [var for var in tf.trainable_variables() if var.name.startswith(scope)]
+            self.saver = tf.train.Saver(var_list = self._vars, max_to_keep=None)
 
         print('DecoderCritic(cell_size={0}, scope={1})'.format(self.CELL_SIZE, str(scope)))
 
