@@ -280,6 +280,8 @@ class ACTrainer(Trainer):
 
         self.targets = tf.placeholder(tf.int32, [None, None], name='ph/targets')
         self.targets_length = tf.placeholder(tf.int32, [None], name='ph/targets_length')
+
+        self._generated_token_ids = tf.placeholder(tf.int32, [None, None], name='ph/generated_token_ids')
         self._r = tf.placeholder(tf.float32, [None, None], name='ph/r')
 
         avg_bleu = tf.reduce_mean(tf.reduce_sum(self._r, -1) / tf.cast(self.targets_length, tf.float32))
@@ -304,6 +306,10 @@ class ACTrainer(Trainer):
         self.target_agent.saver.save(self._sess, '{0}/checkpoints/target_agent.ckpt'.format(self._save_path), global_step=step)
         self.target_critic.saver.save(self._sess, '{0}/checkpoints/target_critic.ckpt'.format(self._save_path), global_step=step)
 
+    def reset_gammas(self):
+        self.GAMMA_ACTOR = 1e-2
+        self.GAMMA_CRITIC = 1e-2
+
     def _initialize(self, agent_path):
         self._sess.run(tf.global_variables_initializer())
 
@@ -321,10 +327,12 @@ class ACTrainer(Trainer):
         self._sess.run(copy_ops)
 
     def _agent_builder(self, scope='agent', reuse=False):
+        dropout = (0.0 if scope.startswith('target') else self._dropout)
+
         return Agent(
             n_slots = self._n_slots, n_actions = self._n_actions,
             word_embeddings_shape = self._word_embeddings_shape,
-            hidden_size = self._hidden_size, dropout=self._dropout,
+            hidden_size = self._hidden_size, dropout=dropout,
             decoder_helper_initializer = self._decoder_helper(),
             scope = scope, reuse = reuse
         )
@@ -385,13 +393,13 @@ class ACTrainer(Trainer):
     @property
     def _generated_token_weights(self):
         # TODO: Use gather_nd
-        token_mask = tf.one_hot(tf.stop_gradient(self.target_agent.decoder_token_ids), self._word_embeddings_shape[0])
+        token_mask = tf.one_hot(self._generated_token_ids, self._word_embeddings_shape[0])
         return tf.reduce_sum(token_mask * self.critic.values, -1)
 
     @property
     def _generated_token_probabilites(self):
         # TODO: Use gather_nd
-        token_mask = tf.one_hot(tf.stop_gradient(self.target_agent.decoder_token_ids), self._word_embeddings_shape[0])
+        token_mask = tf.one_hot(self._generated_token_ids, self._word_embeddings_shape[0])
         return tf.reduce_sum(token_mask * self.agent.decoder_probabilities, -1)
 
     def _objectives(self):
@@ -452,13 +460,16 @@ class ACTrainer(Trainer):
     def train_critic_batch(self, e, i, batch):
         token_ids, new_states = self._sess.run(
             [self.target_agent.decoder_token_ids, self.target_agent.context_state],
-            feed_dict = self._feed_dict(batch, {self._dropout: 0.0})
+            feed_dict = self._feed_dict(batch)
         )
 
         r = self._bleu_reward(batch, token_ids)
         _, _, metrics_val = self._sess.run(
             [self._train_critic, self._interpolate_critic_weights, self._metrics_op],
-            feed_dict = self._feed_dict(batch, {self._r: r})
+            feed_dict = self._feed_dict(batch, {
+                self._r: r,
+                self._generated_token_ids: token_ids
+            })
         )
 
         if i % 20 == 0:
@@ -468,13 +479,17 @@ class ACTrainer(Trainer):
     def test_critic_batch(self, e, i, batch):
         token_ids, new_states = self._sess.run(
             [self.target_agent.decoder_token_ids, self.target_agent.context_state],
-            feed_dict = self._feed_dict(batch, {self._dropout: 0.0})
+            feed_dict = self._feed_dict(batch)
         )
 
         r = self._bleu_reward(batch, token_ids)
         metrics_val = self._sess.run(
             self._metrics_op,
-            feed_dict = self._feed_dict(batch, {self._r: r, self._dropout: 0.0})
+            feed_dict = self._feed_dict(batch, {
+                self._r: r,
+                self._generated_token_ids: token_ids,
+                self._dropout: 0.0
+            })
         )
 
         if i % 20 == 0:
@@ -484,13 +499,16 @@ class ACTrainer(Trainer):
     def train_batch(self, e, i, batch):
         token_ids, new_states = self._sess.run(
             [self.target_agent.decoder_token_ids, self.target_agent.context_state],
-            feed_dict = self._feed_dict(batch, {self._dropout: 0.0})
+            feed_dict = self._feed_dict(batch)
         )
 
         r = self._bleu_reward(batch, token_ids)
         _, _, _, _, metrics_val = self._sess.run(
             [self._train_critic, self._train_agent, self._interpolate_agent_weights, self._interpolate_critic_weights, self._metrics_op],
-            feed_dict = self._feed_dict(batch, {self._r: r})
+            feed_dict = self._feed_dict(batch, {
+                self._r: r,
+                self._generated_token_ids: token_ids
+            })
         )
 
         if i % 200 == 0:
@@ -500,13 +518,17 @@ class ACTrainer(Trainer):
     def test_batch(self, e, i, batch):
         token_ids, new_states = self._sess.run(
             [self.target_agent.decoder_token_ids, self.target_agent.context_state],
-            feed_dict = self._feed_dict(batch, {self._dropout: 0.0})
+            feed_dict = self._feed_dict(batch)
         )
 
         r = self._bleu_reward(batch, token_ids)
         metrics_val = self._sess.run(
             self._metrics_op,
-            feed_dict = self._feed_dict(batch, {self._r: r, self._dropout: 0.0})
+            feed_dict = self._feed_dict(batch, {
+                self._r: r,
+                self._generated_token_ids: token_ids,
+                self._dropout: 0.0
+            })
         )
 
         if i % 200 == 0:
