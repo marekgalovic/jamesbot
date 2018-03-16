@@ -105,7 +105,8 @@ class ChatSession(object):
         self.agent = Agent(
             word_embeddings_shape = [len(self._word_embeddings), 300],
             n_slots = len(self._slot_embeddings), n_actions = len(self._action_embbeddings),
-            hidden_size = self._hidden_size
+            hidden_size = self._hidden_size, scope='target_agent',
+            decoder_max_iter = 50
         )
 
         self.agent.saver.restore(self._sess, self._checkpoint)

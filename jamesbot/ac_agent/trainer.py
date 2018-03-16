@@ -269,8 +269,8 @@ class CrossEntropyTrainer(Trainer):
 
 class ACTrainer(Trainer):
 
-    LAMBDA_C = 1e-1
-    LAMBDA_LL = 1e-1
+    LAMBDA_C = 1e-4
+    LAMBDA_LL = 1e-4
 
     GAMMA_ACTOR = 1e-2
     GAMMA_CRITIC = 1e-2
@@ -306,6 +306,8 @@ class ACTrainer(Trainer):
 
     def _initialize(self, agent_path):
         self._sess.run(tf.global_variables_initializer())
+
+        print('Restore agent:', agent_path)
         self.target_agent.saver.restore(self._sess, agent_path)
 
         copy_ops = []
@@ -395,10 +397,10 @@ class ACTrainer(Trainer):
     def _objectives(self):
         q = self._r + tf.stop_gradient(tf.reduce_sum(self.target_agent.decoder_probabilities * self.target_critic.values, -1))
         c = tf.reduce_sum(tf.square(self.critic.values - tf.reduce_mean(self.critic.values, -1, keep_dims=True)), -1)
-        self._critic_objective = tf.reduce_sum(tf.square(self._generated_token_weights - q) + (self.LAMBDA_C * c), [-1, -2])
+        self._critic_objective = tf.reduce_mean(tf.reduce_sum(tf.square(self._generated_token_weights - q) + (self.LAMBDA_C * c), -1))
 
         ll_reg = tf.reduce_sum(self._generated_token_probabilites, -1)
-        self._agent_objective = tf.reduce_sum(tf.reduce_sum(self.agent.decoder_probabilities * self.critic.values, [-1, -2]) + self.LAMBDA_LL * ll_reg)
+        self._agent_objective = tf.reduce_mean(tf.reduce_sum(self.agent.decoder_probabilities * self.critic.values, [-1, -2]) + self.LAMBDA_LL * ll_reg)
 
         tf.summary.scalar('critic_objective', self._critic_objective)
         tf.summary.scalar('agent_objective', self._agent_objective)
@@ -450,7 +452,7 @@ class ACTrainer(Trainer):
     def train_critic_batch(self, e, i, batch):
         token_ids, new_states = self._sess.run(
             [self.target_agent.decoder_token_ids, self.target_agent.context_state],
-            feed_dict = self._feed_dict(batch)
+            feed_dict = self._feed_dict(batch, {self._dropout: 0.0})
         )
 
         r = self._bleu_reward(batch, token_ids)
@@ -466,7 +468,7 @@ class ACTrainer(Trainer):
     def test_critic_batch(self, e, i, batch):
         token_ids, new_states = self._sess.run(
             [self.target_agent.decoder_token_ids, self.target_agent.context_state],
-            feed_dict = self._feed_dict(batch)
+            feed_dict = self._feed_dict(batch, {self._dropout: 0.0})
         )
 
         r = self._bleu_reward(batch, token_ids)
@@ -482,7 +484,7 @@ class ACTrainer(Trainer):
     def train_batch(self, e, i, batch):
         token_ids, new_states = self._sess.run(
             [self.target_agent.decoder_token_ids, self.target_agent.context_state],
-            feed_dict = self._feed_dict(batch)
+            feed_dict = self._feed_dict(batch, {self._dropout: 0.0})
         )
 
         r = self._bleu_reward(batch, token_ids)
@@ -498,7 +500,7 @@ class ACTrainer(Trainer):
     def test_batch(self, e, i, batch):
         token_ids, new_states = self._sess.run(
             [self.target_agent.decoder_token_ids, self.target_agent.context_state],
-            feed_dict = self._feed_dict(batch)
+            feed_dict = self._feed_dict(batch, {self._dropout: 0.0})
         )
 
         r = self._bleu_reward(batch, token_ids)

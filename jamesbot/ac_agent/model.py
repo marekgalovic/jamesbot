@@ -7,7 +7,7 @@ from jamesbot.utils.padding import add_pad_eos
 
 class Agent(object):
     
-    def __init__(self, word_embeddings_shape, n_slots, n_actions, trainable_embeddings=True, hidden_size=300, dropout=0.0, decoder_helper_initializer=None, scope='agent', reuse=False):
+    def __init__(self, word_embeddings_shape, n_slots, n_actions, trainable_embeddings=True, hidden_size=300, dropout=0.0, decoder_helper_initializer=None, decoder_max_iter=None, scope='agent', reuse=False):
         super(Agent, self).__init__()
 
         # Conf
@@ -17,6 +17,7 @@ class Agent(object):
         self._n_actions = int(n_actions)
         self._n_query_states = 3
         self._trainable_embeddings = bool(trainable_embeddings)
+        self._decoder_max_iter = decoder_max_iter
         self._dropout = dropout
 
         self._decoder_helper_initializer = decoder_helper_initializer
@@ -254,7 +255,8 @@ class Agent(object):
 
             decoder_outputs, _, _ = seq2seq.dynamic_decode(
                 decoder = decoder,
-                impute_finished = True
+                impute_finished = True,
+                maximum_iterations = self._decoder_max_iter
             )
             
             self._decoder_logits = decoder_outputs.rnn_output
