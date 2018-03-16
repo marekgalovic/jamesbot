@@ -24,6 +24,11 @@ class DecoderCritic(object):
 
     def _embeddings(self):
         with tf.name_scope('embeddings'):
+            self._agent_outputs_embedded = tf.nn.embedding_lookup(
+                self._agent._word_embeddings,
+                self._agent.decoder_token_ids
+            )
+
             self._targets_embedded = tf.nn.embedding_lookup(
                 self._agent._word_embeddings,
                 add_pad_eos(self._targets, self._targets_length, pre_pad=False)
@@ -48,7 +53,7 @@ class DecoderCritic(object):
 
             _outputs, _ = tf.nn.dynamic_rnn(
                 decoder_cell,
-                inputs = self._agent._decoder_logits,
+                inputs = self._agent_outputs_embedded,
                 sequence_length = (self._targets_length + 2),
                 initial_state = decoder_initial_state,
                 dtype = tf.float32
