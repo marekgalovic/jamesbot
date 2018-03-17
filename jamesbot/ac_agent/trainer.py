@@ -272,10 +272,10 @@ class ACTrainer(Trainer):
     LAMBDA_C = 1e-4
     LAMBDA_LL = 1e-4
 
-    GAMMA_ACTOR = 1e-2
-    GAMMA_CRITIC = 1e-2
+    GAMMA_ACTOR = 1e-6
+    GAMMA_CRITIC = 1e-6
 
-    def __init__(self, agent_path=None, **kwargs):
+    def __init__(self, agent_path=None, critic_path=None, **kwargs):
         super(ACTrainer, self).__init__(**kwargs)
 
         self.targets = tf.placeholder(tf.int32, [None, None], name='ph/targets')
@@ -299,7 +299,7 @@ class ACTrainer(Trainer):
         self._objectives()
         self._interpolate_ops()
         self._train_ops()
-        self._initialize(agent_path)
+        self._initialize(agent_path, critic_path)
         self._metrics_writers()
 
     def save_checkpoint(self, step):
@@ -307,14 +307,18 @@ class ACTrainer(Trainer):
         self.target_critic.saver.save(self._sess, '{0}/checkpoints/target_critic.ckpt'.format(self._save_path), global_step=step)
 
     def reset_gammas(self):
-        self.GAMMA_ACTOR = 1e-2
-        self.GAMMA_CRITIC = 1e-2
+        self.GAMMA_ACTOR = 1e-6
+        self.GAMMA_CRITIC = 1e-6
 
-    def _initialize(self, agent_path):
+    def _initialize(self, agent_path, critic_path):
         self._sess.run(tf.global_variables_initializer())
 
         print('Restore agent:', agent_path)
         self.target_agent.saver.restore(self._sess, agent_path)
+
+        if critic_path is not None:
+            print('Restore critic:', critic_path)
+            self.target_critic.saver.restore(self._sess, critic_path)
 
         copy_ops = []
         for var, target_var in zip(self.agent._vars, self.target_agent._vars):
@@ -408,7 +412,7 @@ class ACTrainer(Trainer):
         self._critic_objective = tf.reduce_mean(tf.reduce_sum(tf.square(self._generated_token_weights - q) + (self.LAMBDA_C * c), -1))
 
         ll_reg = tf.reduce_sum(self._generated_token_probabilites, -1)
-        self._agent_objective = tf.reduce_mean(tf.reduce_sum(self.agent.decoder_probabilities * self.critic.values, [-1, -2]) + self.LAMBDA_LL * ll_reg)
+        self._agent_objective = tf.reduce_mean(tf.reduce_sum(self.agent.decoder_probabilities * tf.stop_gradient(self.critic.values), [-1, -2]) + self.LAMBDA_LL * ll_reg)
 
         tf.summary.scalar('critic_objective', self._critic_objective)
         tf.summary.scalar('agent_objective', self._agent_objective)
@@ -503,16 +507,29 @@ class ACTrainer(Trainer):
         )
 
         r = self._bleu_reward(batch, token_ids)
-        _, _, _, _, metrics_val = self._sess.run(
-            [self._train_critic, self._train_agent, self._interpolate_agent_weights, self._interpolate_critic_weights, self._metrics_op],
+        self._sess.run(
+            self._train_critic,
             feed_dict = self._feed_dict(batch, {
                 self._r: r,
-                self._generated_token_ids: token_ids
+                self._generated_token_ids: token_ids,
+                self._dropout: 0.0
             })
         )
 
-        if i % 200 == 0:
+        _, metrics_val = self._sess.run(
+            [self._train_agent, self._metrics_op],
+            feed_dict = self._feed_dict(batch, {
+                self._r: r,
+                self._generated_token_ids: token_ids,
+                self._dropout: 0.0
+            })
+        )
+
+        self._sess.run([self._interpolate_agent_weights, self._interpolate_critic_weights])
+
+        if i % 100 == 0:
             self._train_writer.add_summary(metrics_val)
+
         self._update_states(new_states)
 
     def test_batch(self, e, i, batch):
@@ -531,6 +548,7 @@ class ACTrainer(Trainer):
             })
         )
 
-        if i % 200 == 0:
+        if i % 100 == 0:
             self._test_writer.add_summary(metrics_val)
+
         self._update_states(new_states)

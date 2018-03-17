@@ -13,6 +13,7 @@ parser.add_option('--data-dir', dest='data_dir')
 parser.add_option('--job-dir', dest='models_dir')
 parser.add_option('--run-name', dest='run_name')
 parser.add_option('--agent-checkpoint', dest='agent_checkpoint', default=None)
+parser.add_option('--critic-checkpoint', dest='critic_checkpoint', default=None)
 
 options, _ = parser.parse_args()
 print('Data dir:', options.data_dir)
@@ -80,29 +81,33 @@ def train(actor_epochs = 15, critic_epochs = 5, ac_epochs = 3, batch_size=64, te
         n_actions = len(actions_dict),
         word_embeddings_shape = embeddings.shape,
         save_path = '{0}/ac'.format(base_path), 
-        agent_path = (options.agent_checkpoint or '%s-0' % (ce_trainer.checkpoints_path))
+        agent_path = (options.agent_checkpoint or '%s-0' % (ce_trainer.checkpoints_path)),
+        critic_path = options.critic_checkpoint
     )
 
-    # Pre-train critic
-    ac_trainer.GAMMA_CRITIC = 1.0
-    for e in range(critic_epochs):
-        print('Critic pre-training epoch:', e)
+    if options.critic_checkpoint is None:
+        # Pre-train critic
+        ac_trainer.GAMMA_CRITIC = 1.0
+        for e in range(critic_epochs):
+            print('Critic pre-training epoch:', e)
 
-        ac_trainer.reset()
-        for i, batch in enumerate(train_samples_iterator.batches()):
-            ac_trainer.train_critic_batch(e, i, batch)
+            ac_trainer.reset()
+            for i, batch in enumerate(train_samples_iterator.batches()):
+                ac_trainer.train_critic_batch(e, i, batch)
 
-            if test:
-                break
+                if test:
+                    break
 
-        ac_trainer.reset()
-        for i, batch in enumerate(test_samples_iterator.batches()):
-            ac_trainer.test_critic_batch(e, i, batch)
+            ac_trainer.reset()
+            for i, batch in enumerate(test_samples_iterator.batches()):
+                ac_trainer.test_critic_batch(e, i, batch)
 
-            if test:
-                break
+                if test:
+                    break
 
-    ac_trainer.reset_gammas()
+        ac_trainer.save_checkpoint(0)
+        ac_trainer.reset_gammas()
+
     ac_trainer.set_batch_size(20)
     train_samples_iterator = SamplesIterator(samples_train, batch_size=20)
     test_samples_iterator = SamplesIterator(samples_test, batch_size=20)
@@ -125,7 +130,7 @@ def train(actor_epochs = 15, critic_epochs = 5, ac_epochs = 3, batch_size=64, te
             if test:
                 break
 
-        ac_trainer.save_checkpoint(e)
+        ac_trainer.save_checkpoint(e + 1)
 
 
 if __name__ == '__main__':
@@ -142,3 +147,4 @@ if __name__ == '__main__':
     }
 
     train(**train_spec)
+    # train(**test_spec)
