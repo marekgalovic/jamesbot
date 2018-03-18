@@ -35,7 +35,7 @@ actions_dict = load_data('actions_dictionary.json')
 samples_train = load_data('embedded_frames_train.json')
 samples_test = load_data('embedded_frames_test.json')
 
-def train(actor_epochs = 15, critic_epochs = 5, ac_epochs = 3, batch_size=64, test=False):
+def train(actor_epochs = 15, critic_epochs = 5, ac_epochs = 15, batch_size=64, test=False):
     print('train(actor_epochs=%d, critic_epochs=%d, ac_epochs=%d, batch_size=%d, test=%r)' % (actor_epochs, critic_epochs, ac_epochs, batch_size, test))
     base_path = '{0}/ac_agent_{1}'.format(options.models_dir, options.run_name)
 

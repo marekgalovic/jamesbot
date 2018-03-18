@@ -270,10 +270,10 @@ class CrossEntropyTrainer(Trainer):
 class ACTrainer(Trainer):
 
     LAMBDA_C = 1e-4
-    LAMBDA_LL = 1e-4
+    LAMBDA_LL = 1e-3
 
-    GAMMA_ACTOR = 1e-6
-    GAMMA_CRITIC = 1e-6
+    GAMMA_ACTOR = 1e-5
+    GAMMA_CRITIC = 1e-5
 
     def __init__(self, agent_path=None, critic_path=None, **kwargs):
         super(ACTrainer, self).__init__(**kwargs)
@@ -307,8 +307,8 @@ class ACTrainer(Trainer):
         self.target_critic.saver.save(self._sess, '{0}/checkpoints/target_critic.ckpt'.format(self._save_path), global_step=step)
 
     def reset_gammas(self):
-        self.GAMMA_ACTOR = 1e-6
-        self.GAMMA_CRITIC = 1e-6
+        self.GAMMA_ACTOR = 1e-5
+        self.GAMMA_CRITIC = 1e-5
 
     def _initialize(self, agent_path, critic_path):
         self._sess.run(tf.global_variables_initializer())
